@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "source": "ux_agent/full-app-cards.json",
+      "file": "full-app-cards.json",
+      "sha256": "bd95730c3eea810531901d820f09fb85b4cc18297bcbc2b9a8a8287608b87020"
+    }
+  ]
+}

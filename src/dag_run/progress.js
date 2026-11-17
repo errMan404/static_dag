@@ -26,6 +26,7 @@ export class Progress {
       localBranch: this.run?.state.localBranch, initialCommit: this.run?.state.initialCommit, integrationBranch: this.run?.state.integrationBranch,
       gitea: this.run?.state.gitea,
       maxConcurrency: this.run?.state.maxConcurrency,
+      ux: this.run?.state.ux,
       detail: this.detail, directory: this.run?.dir, startedAt: this.started, updatedAt: Date.now(),
       tasks: (this.run?.state.tasks ?? []).map(({ id, title, status, dependencies, session, workspaceID, pr, error, retry }) =>
         ({ id, title, status, dependencies, session, workspaceID, pr, error, retry })) };

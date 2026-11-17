@@ -45,6 +45,7 @@ export function Dashboard(props) {
     </box>
     <text fg={theme().textMuted} truncate>{view()?.root ?? props.root()}</text>
     <Show when={view()?.gitea?.repo}><text fg={theme().textMuted} truncate>本轮仓库：{view()?.gitea?.owner}/{view()?.gitea?.repo}</text></Show>
+    <Show when={view()?.ux}><text fg={theme().textMuted}>UX 未验证 · {view()?.ux?.reason === 'no-device' ? '未提供设备' : '设备证据未核验'} · 代码完成不代表 UX 通过</text></Show>
     <box backgroundColor={theme().backgroundPanel} padding={1} flexDirection="column" gap={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text fg={theme().text}>{done()} / {tasks().length} 个任务已完成 · 执行中 {tasks().filter(task => task.status === 'running').length} · 并发上限 {view()?.maxConcurrency ?? 1}</text>

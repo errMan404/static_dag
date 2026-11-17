@@ -9,6 +9,7 @@ import { resolveGiteaToken } from './credentials.js';
 import { loadRunnerConfig, enableWorkspaces } from '../runtime/local-gitea.js';
 import { taskInput } from './input.js';
 import { ModelGate, rateLimit, retryDelay } from './rate-limit.js';
+import { loadUx, nodeUx, writeUxReport } from './ux.js';
 
 export const registry = globalThis[Symbol.for('static-dag.execution')] ??= { runs: new Map(), workers: new Map(), roots: new Map() };
 export const DEFAULT_MAX_CONCURRENCY = 20;
@@ -29,6 +30,7 @@ export class DagRun {
     root = resolve(root);
     if (registry.roots.has(root)) throw new Error('当前 worktree 已有 DAG 在执行');
     const dag = parseDag(await readFile(join(root, '.dag/dag.json'), 'utf8'));
+    const ux = await loadUx(root, dag.tasks);
     if (process.env.OPENCODE_EXPERIMENTAL_WORKSPACES !== 'true' && process.env.OPENCODE_EXPERIMENTAL_WORKSPACES !== '1') {
       await enableWorkspaces();
       throw new Error('已为当前 Windows 用户保存 Workspace 开关。OpenCode 1.19.5 在启动时读取它，请关闭并重新打开终端应用后再运行 /dag_run。也可在当前终端设置 $env:OPENCODE_EXPERIMENTAL_WORKSPACES="true" 后启动 OpenCode。');
@@ -57,10 +59,18 @@ export class DagRun {
     run.state.gitea = {url: provider.url, owner: config.gitea.owner,
       repo: `${config.gitea.repoPrefix ?? config.gitea.repo}-${run.state.id}`};
     run.dir = join(root, '.dag/runs', run.state.id);
+    if (ux) {
+      run.state.ux = {version: ux.version, manifestDigest: ux.manifestDigest, cardsDigest: ux.cardsDigest,
+        device: ux.device, acceptance: 'unverified', reason: ux.device === null ? 'no-device' : 'device-evidence-not-reviewed'};
+      for (const task of run.state.tasks) task.ux = nodeUx(ux, task.id);
+    }
     try { run.lock = await open(join(root, '.dag/run.lock'), 'wx'); await run.lock.writeFile(JSON.stringify({ pid: process.pid, runId: run.state.id })); }
     catch (error) { throw new Error(error.code === 'EEXIST' ? '存在 .dag/run.lock；请确认无其他运行后再处理残留锁。' : error.message); }
     registry.roots.set(root, run); registry.runs.set(parent, run);
-    try { await run.save(); } catch (error) { await run.release(); throw error; }
+    try {
+      await run.save();
+      if (ux) await writeFile(join(run.dir, 'ux-input.json'), JSON.stringify(ux, null, 2) + '\n');
+    } catch (error) { await run.release(); throw error; }
     return run;
   }
   save() {
@@ -156,6 +166,8 @@ export class DagRun {
         this.state.status = this.failure ? 'failed' : 'cancelled';
         this.state.error = (this.failure ?? error).message;
         for (const task of this.state.tasks) if (task.status === 'pending') task.status = 'blocked';
+        try { await writeUxReport(this); }
+        catch (reportError) { this.state.ux.reportError = reportError.message; }
         await this.save(); await this.release();
         await this.progress?.finish(this.state.error);
       }
@@ -173,9 +185,12 @@ export class DagRun {
   }
   async complete() {
     if (this.active.size) throw new Error('仍有活动 Agent，不能结束 DAG');
-    this.state.status = this.state.tasks.every(task => task.status === 'done') ? 'done' : 'blocked';
+    const status = this.state.tasks.every(task => task.status === 'done') ? 'done' : 'blocked';
+    await writeUxReport({dir: this.dir, state: {...this.state, status}});
+    this.state.status = status;
     await this.save(); await this.release();
-    await this.progress?.finish(this.state.status === 'done' ? '所有节点已完成并合并到主分支' : '没有可执行节点，DAG 已阻塞');
+    await this.progress?.finish(this.state.status === 'done' ? '所有节点已完成并合并到主分支' +
+      (this.state.ux ? `；UX 未验证（${this.state.ux.reason}），交付部分完成` : '') : '没有可执行节点，DAG 已阻塞');
     return this.state;
   }
   async promptTask(task, query, headers, prompt, signal) {

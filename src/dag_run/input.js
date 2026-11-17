@@ -1,4 +1,5 @@
 import {readFileSync} from 'node:fs';
+import {uxInput} from './ux.js';
 
 const template = readFileSync(new URL('./task.md', import.meta.url), 'utf8').trim();
 
@@ -18,5 +19,5 @@ export function taskInput(task, predecessors = [], inherited = false) {
     predecessors: !inherited && predecessors.length ? '\n\n前置任务结果\n' + predecessors.map(item =>
       `任务 ${item.id}：${item.title}\n${item.report?.trim() || '已完成，代码已合入当前工作目录。'}`).join('\n\n') : ''
   };
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values[key] ?? ''));
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values[key] ?? '')) + uxInput(task.ux);
 }

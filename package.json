@@ -22,6 +22,7 @@
   "files": [
     "src/",
     "prompts/",
+    "assets/",
     "dist/",
     "vendor/gitea/",
     "bin/",
@@ -41,7 +42,8 @@
     "prepack": "npm run build",
     "test": "node --test test/*.test.js",
     "test:integration": "node test/integration.mjs",
-    "test:run": "node test/run-integration.mjs"
+    "test:run": "node test/run-integration.mjs",
+    "test:ux": "node test/ux-run.mjs"
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.19.5"

@@ -1,18 +1,29 @@
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, writeFile, readFile, readdir, rm, rename } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, readdir, rm, rename, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { git } from '../src/dag_run/git.js';
 import { parseWorkerInput } from './worker-fixture.js';
 
-const parent = join(tmpdir(), 'dag-execution-tests'); await mkdir(parent, { recursive: true });
+const parentPath = join(tmpdir(), 'dag-execution-tests'); await mkdir(parentPath, { recursive: true });
+const parent = await realpath(parentPath);
+const testUx = process.env.DAG_TEST_UX === '1';
+let uxRunReport;
+const uxCards = JSON.parse(await readFile(new URL('../assets/ux/full-app-cards.json', import.meta.url), 'utf8'));
+const uxIds = ['UX.APP.SHELL', 'UX.SHOP.GRID', 'UX.CAR.BROWSE', 'UX.WINDOW.CONTEXT.STATE'];
+async function prepareUx(tasks) {
+  if (!testUx) return;
+  await writeFile(join(repo, '.dag/ux.json'), JSON.stringify({version: 1, cardsFile: 'ux-assets/cards.json', device: null,
+    requirements: ['保留原有业务状态'], nodes: tasks.map(task => ({taskId: task.id, cardIds: [uxIds[task.id - 1]], requirements: []}))}));
+}
 const fixture = await mkdtemp(join(parent, 'run-')), repo = join(fixture, 'repo'), remote = join(fixture, 'remote.git'), integrator = join(fixture, 'integrator');
 await mkdir(repo); execFileSync('git', ['init', '-q', '-b', 'main', repo]);
 for (const [key, value] of [['user.name', 'DAG fixture'], ['user.email', 'dag@example.invalid']]) await git(repo, ['config', key, value]);
 await writeFile(join(repo, '.gitignore'), '.dag/\n'); await writeFile(join(repo, 'shared.txt'), 'base\n');
+if (testUx) {await mkdir(join(repo, 'ux-assets')); await writeFile(join(repo, 'ux-assets/cards.json'), JSON.stringify(uxCards));}
 await git(repo, ['add', '.']); await git(repo, ['commit', '-qm', 'initial']);
 await git(repo, ['clone', '--bare', repo, remote]); await git(repo, ['remote', 'add', 'origin', remote]);
 await git(repo, ['push', '-u', 'origin', 'main']); await git(repo, ['clone', remote, integrator]);
@@ -65,6 +76,7 @@ await new Promise(r => provider.listen(0, '127.0.0.1', r));
 const tasks = [[], [1], [1], [2, 3]].map((dependencies, i) => ({ id: i + 1, title: `fixture-${i + 1}`, description: '开发测试文件', details: '按任务写文件并提交', testStrategy: '文件内容核对', dependencies }));
 await mkdir(join(repo, '.dag'));
 await writeFile(join(repo, '.dag/dag.json'), JSON.stringify({ tasks }));
+await prepareUx(tasks);
 await writeFile(join(repo, '.dag/runner.json'), JSON.stringify({ remote: 'origin', baseBranch: 'main', modelRequestsPerMinute: 600, gitea: { url: `http://127.0.0.1:${provider.address().port}`, owner: 'test', repo: 'fixture' } }));
 const steps = new Map(), workerDirectories = new Map(), repairs = new Map(); let failure, completed = false, requestCount = 0;
 const testRateLimit = process.env.DAG_TEST_RATE_LIMIT === '1';
@@ -91,6 +103,14 @@ const model = http.createServer(async (req, res) => {
     workerRequestTimes.push(Date.now());
     const originalTask = body.messages.filter(m => m.role === 'user').map(m => text(m.content)).findLast(content => /^任务 \d+：/m.test(content));
     const input = parseWorkerInput(originalTask), id = input.id, cwd = input.worktree;
+    if (testUx) {
+      const packet = originalTask.split('本节点 UX 资产（本次分配优先于 Fork 历史中的其他节点资产）\n')[1];
+      assert.ok(packet, '实际模型请求必须收到 UX 资产');
+      const ux = JSON.parse(packet.split('\n先阅读本节点卡片')[0]);
+      assert.deepEqual(ux.cardIds, [uxIds[id - 1]]);
+      assert.deepEqual(ux.cards, [uxCards.cards.find(card => card.id === uxIds[id - 1])]);
+      assert.equal(ux.reason, 'no-device');
+    }
     if (holdWorker) {
       heldWorkers.add(id);
       await new Promise(resolve => res.once('close', resolve));
@@ -193,6 +213,14 @@ try {
   if (failure) throw failure;
   const [runId] = await readdir(join(repo, '.dag/runs')); const state = JSON.parse(await readFile(join(repo, '.dag/runs', runId, 'state.json'), 'utf8'));
   assert.equal(state.status, 'done', JSON.stringify(state.tasks.map(t => ({ id: t.id, status: t.status, error: t.error }))));
+  if (testUx) {
+    const report = JSON.parse(await readFile(join(repo, '.dag/runs', runId, 'ux-report.json'), 'utf8'));
+    assert.equal(report.delivery, 'partial'); assert.equal(report.acceptance, 'unverified');
+    assert.equal(report.reason, 'no-device'); assert.ok(report.tasks.every(task => task.execution === 'done'));
+    await readFile(join(repo, '.dag/runs', runId, 'ux-input.json'));
+    uxRunReport = report;
+    console.log(JSON.stringify({ux_assets_in_real_model_requests: true, no_device_dag_completed: true, ux_acceptance: report.acceptance, delivery: report.delivery}));
+  }
   assert.ok(actualConflict); assert.equal(prCount, 4); assert.equal(workerDirectories.size, 4);
   assert.equal(state.initialCommit, initialCommit);
   assert.equal(state.maxConcurrency, 20);
@@ -246,6 +274,7 @@ try {
   const nextBaseline = await git(repo, ['rev-parse', 'HEAD']);
   steps.clear(); workerDirectories.clear();
   await writeFile(join(repo, '.dag/dag.json'), JSON.stringify({tasks: [tasks[0]]}));
+  await prepareUx([tasks[0]]);
   const secondSource = await api('/session', 'POST', {title: 'DAG independent repository fixture'});
   await control(secondSource.id, 'start');
   const secondParts = await until(async () => (await api(`/session/${secondSource.id}/message`)).flatMap(m => m.parts),
@@ -265,6 +294,7 @@ try {
   // may start just because the controlling parent has no active model turn.
   holdWorker = true;
   await writeFile(join(repo, '.dag/dag.json'), JSON.stringify({tasks: tasks.slice(0, 3).map((task, index) => ({...task, dependencies: index === 2 ? [1, 2] : []}))}));
+  await prepareUx(tasks.slice(0, 3));
   const cancelledSource = await api('/session', 'POST', {title: 'DAG cancellation fixture'});
   await control(cancelledSource.id, 'start');
   await until(async () => heldWorkers.size, value => value === 2);
@@ -277,6 +307,10 @@ try {
   assert.ok(cancelled.tasks.slice(2).every(task => task.status === 'blocked' && !task.session));
   assert.equal(prCount, 5, '取消不能产生后续 PR');
   console.log(JSON.stringify({cancellation_verified: true, downstream_started: false}));
+  if (testUx && process.env.DAG_TEST_REPORT) await writeFile(resolve(process.env.DAG_TEST_REPORT), JSON.stringify({
+    scope: 'real OpenCode 1.19.5 + real Git + fixture model + mock Gitea API; no device UX validation',
+    checks: {nodeAssetInjection: true, forkAndJoin: true, parallelExecution: true, prMerge: true,
+      conflictRepair: true, independentRuns: true, cancellation: true, noDeviceContinues: true}, report: uxRunReport}, null, 2));
 } catch (error) { console.error(error.stack, '\nSERVER', logs.slice(-2500)); process.exitCode = 1; }
 finally {
   child.kill(); if (child.exitCode === null) await new Promise(r => child.once('close', r));

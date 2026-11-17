@@ -1,0 +1,370 @@
+{
+  "version": "0.2.0",
+  "scope": "BTYOMI 全应用真实改造：官方做法 + 逐页项目状态契约",
+  "cards": [
+    {
+      "id": "UX.NEWS.FEED.REPEAT",
+      "task": "browse_automotive_news",
+      "appliesWhen": "重复的资讯条目，标题、作者和配图属于同一内容实体",
+      "excludeWhen": "业务要求顺序沉浸阅读，或卡片空间不足以完整呈现标题",
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/responsive-design-examples4-0000001746657290/",
+        "section": "新闻类：首页，左文右图与重复布局",
+        "reviewedOn": "2026-11-13"
+      },
+      "intent": "宽窗口显示更多条目，保持单条阅读宽度和标题可读性，避免简单拉长原单列",
+      "variants": [
+        "窄区域单列",
+        "满足卡片最小宽度时双列或多列"
+      ],
+      "projectParameters": {
+        "minCardWidthVp": 300,
+        "gapVp": 16,
+        "origin": "project-pilot-not-official-mandate"
+      },
+      "preserve": [
+        "原资讯集合和数据 ID",
+        "选中频道",
+        "滚动上下文",
+        "原有点击行为"
+      ],
+      "recipeHints": [
+        "优先复用原 List 与数据源，评估 lanes 或容器栅格",
+        "监听实际可用区域，不使用物理屏幕宽度决定卡片列数",
+        "不要因为多列而重复数据初始化"
+      ],
+      "acceptance": [
+        "窄窗口为单列，宽窗口实际出现多列",
+        "标题、作者和图片无重叠",
+        "滚动能看到后续条目",
+        "切换窗口后频道不重置、内容不重复"
+      ]
+    },
+    {
+      "id": "UX.MEDIA.BANNER.BOUNDED",
+      "task": "browse_automotive_news",
+      "appliesWhen": "首页大幅媒体与下方资讯共同承担浏览任务",
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/responsive-design-examples4-0000001746657290/",
+        "section": "首页：避免大图直接放大导致信息量不足",
+        "reviewedOn": "2026-11-13"
+      },
+      "intent": "按可用高度和媒体比例限制推荐图高度，保留内容焦点并让资讯入口可达",
+      "projectParameters": {
+        "origin": "agent-must-record-project-values"
+      },
+      "preserve": [
+        "现有图片资源",
+        "轮播及滚动能力",
+        "搜索框和频道入口可达"
+      ],
+      "recipeHints": [
+        "检查横向低高度时顶部叠层和滚动占位是否一致",
+        "图片裁剪使用明确 objectFit，不能任意拉伸"
+      ],
+      "acceptance": [
+        "宽窗口图片无明显变形",
+        "顶部搜索与频道不遮挡资讯",
+        "低高度可滚动到全部内容"
+      ]
+    },
+    {
+      "id": "UX.WINDOW.CONTEXT.STATE",
+      "task": "browse_automotive_news",
+      "appliesWhen": "应用会折叠、旋转或改变可用窗口尺寸",
+      "source": {
+        "kind": "project-contract",
+        "path": "一多改造调研/一多UX设计与改造闭环方案_融合版.md",
+        "section": "任务与状态契约"
+      },
+      "intent": "区域布局响应当前窗口，保持当前主 Tab、频道与阅读上下文",
+      "preserve": [
+        "currentTabIndex",
+        "indicatorIndex",
+        "搜索输入",
+        "内容数据实体"
+      ],
+      "recipeHints": [
+        "复用已有窗口和断点机制",
+        "组件回调按生命周期释放",
+        "方向策略与布局策略分别处理",
+        "保留原项目 API 24，不添加版本兼容分支"
+      ],
+      "acceptance": [
+        "旋转或窗口切换实际触发布局变化",
+        "主 Tab 切换与返回可用",
+        "无新增崩溃或持续错误",
+        "几何检查与设备操作分别记录"
+      ]
+    },
+    {
+      "id": "UX.SHOP.GRID",
+      "task": "browse_products",
+      "targets": [
+        "ShoppingMallPage",
+        "CommodityItemComp"
+      ],
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/responsive-design-examples5-0000001930419478/",
+        "section": "首页/商品分类",
+        "reviewedOn": "2026-11-16"
+      },
+      "intent": "商品集合随区域宽度增加可读列数，类别入口保留；广告不淹没商品",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "分类",
+        "数据ID",
+        "列表滚动",
+        "路由参数"
+      ],
+      "acceptance": [
+        "窄/宽实际列数合适",
+        "图片保持比例",
+        "名称价格与点击区域可见",
+        "分类及返回状态保留"
+      ]
+    },
+    {
+      "id": "UX.PRODUCT.DETAIL",
+      "task": "inspect_product",
+      "targets": [
+        "CommodityDetailPage"
+      ],
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/responsive-design-examples5-0000001930419478/",
+        "section": "商品详情",
+        "reviewedOn": "2026-11-16"
+      },
+      "intent": "根据空间组织图片与商品信息，限制媒体高度，底部操作始终可达；不强制新增双路由分栏",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "商品实体",
+        "返回路径",
+        "所选规格颜色数量"
+      ],
+      "acceptance": [
+        "图文不过度拉长",
+        "长页滚动完整",
+        "底部操作不盖内容"
+      ]
+    },
+    {
+      "id": "UX.SHEET.SELECTION",
+      "task": "choose_variant",
+      "targets": [
+        "CommodityDetailPage",
+        "SettingsPage",
+        "SheetTransition"
+      ],
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/responsive-design-examples5-0000001930419478/",
+        "section": "浅层窗口体验（具体参数由项目验证）",
+        "reviewedOn": "2026-11-16"
+      },
+      "intent": "辅助选择保留主页面上下文，面板宽高有界，内容过长可滚动；在手机/宽屏采用适合的承载",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "选择状态",
+        "关闭返回上下文"
+      ],
+      "acceptance": [
+        "选项与关闭按钮可达",
+        "关闭重开选择保留",
+        "不触发真实交易"
+      ]
+    },
+    {
+      "id": "UX.CAR.BROWSE",
+      "task": "select_vehicle",
+      "targets": [
+        "BuyingCarPage"
+      ],
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/cars-0000001930233436/",
+        "section": "选车",
+        "reviewedOn": "2026-11-16"
+      },
+      "intent": "宽区域呈现更多品牌/车型，有真实主辅关系时分栏，窄区域不挤压车型信息",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "品牌车型选择",
+        "列表位置",
+        "车型路由参数"
+      ],
+      "acceptance": [
+        "品牌车型可选择",
+        "窄宽无溢出",
+        "进入详情及返回正确"
+      ]
+    },
+    {
+      "id": "UX.CAR.DETAIL",
+      "task": "inspect_vehicle",
+      "targets": [
+        "BuyingCarDetailPage",
+        "MarqueeImageComp"
+      ],
+      "source": {
+        "url": "https://developer.huawei.com/consumer/cn/doc/design-guides/cars-0000001930233436/",
+        "section": "车辆详情/询底价半模态",
+        "reviewedOn": "2026-11-16"
+      },
+      "intent": "车图与价格配置适应可用区域，避免底部操作遮盖内容；原占位业务不新增实现",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "车辆实体",
+        "图片状态",
+        "原按钮行为"
+      ],
+      "acceptance": [
+        "价格/配置可读",
+        "车图比例正确",
+        "底部栏可达且不遮挡"
+      ]
+    },
+    {
+      "id": "UX.SERVICE.GROUP",
+      "task": "find_service",
+      "targets": [
+        "ServicePage",
+        "MyCharge",
+        "MinePage",
+        "MajorList"
+      ],
+      "source": {
+        "kind": "project-contract",
+        "section": "本工程服务/个人信息分组契约"
+      },
+      "intent": "按任务将服务、订单、车主/账户信息分组，宽屏合理排布，窄屏和低高度支持滚动到底",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "现有功能入口",
+        "数据和文案",
+        "扫描结果业务"
+      ],
+      "acceptance": [
+        "所有入口可见可达",
+        "末尾内容能滚动到",
+        "无重复数据或新增假业务"
+      ]
+    },
+    {
+      "id": "UX.STATION.CONTEXT",
+      "task": "find_station",
+      "targets": [
+        "OptimalStation",
+        "SheetTransition",
+        "CustomDialogExample"
+      ],
+      "source": {
+        "kind": "project-contract",
+        "section": "本工程地图与站点列表的主辅任务关系"
+      },
+      "intent": "窄区域协调地图与底部站点面板，宽区域评估并列主辅布局；排序/搜索/选站状态保持",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "真实MapKit",
+        "选中站点",
+        "地图状态",
+        "搜索排序"
+      ],
+      "acceptance": [
+        "地图与站点不过度遮挡",
+        "列表滚动和排序面板可达",
+        "外部能力缺证据标未验证"
+      ]
+    },
+    {
+      "id": "UX.FORM.READING",
+      "task": "account_entry",
+      "targets": [
+        "SettingsPage",
+        "LoginPage",
+        "PrivacyPolicyPage",
+        "SplashScreenPage"
+      ],
+      "source": {
+        "kind": "project-contract",
+        "section": "本工程账户表单/阅读/启动契约"
+      },
+      "intent": "表单和正文限制阅读宽度，键盘不遮必要操作；背景与启动图保持裁剪比例，保留原启动路由",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "现有鉴权",
+        "输入",
+        "隐私流程",
+        "语言选择",
+        "倒计时"
+      ],
+      "acceptance": [
+        "表单和按钮可达",
+        "隐私长文可读可滚动",
+        "启动跳转保持",
+        "语言面板能打开和关闭"
+      ]
+    },
+    {
+      "id": "UX.APP.SHELL",
+      "task": "navigate_app",
+      "targets": [
+        "NavigationPage",
+        "TabPage",
+        "EntryAbility",
+        "PageHeaderComp"
+      ],
+      "source": {
+        "kind": "project-contract",
+        "section": "本工程跨页面窗口/导航/安全区契约"
+      },
+      "intent": "共享窗口尺寸、安全区和导航机制为各页提供一致容器，底部导航与页面固定操作互不覆盖",
+      "appliesWhen": "真实页面具备相应内容/任务关系且区域尺寸允许",
+      "excludeWhen": "实际任务关系不成立或最小可读/可操作区域不足；记录排除理由",
+      "projectParameters": {
+        "origin": "agent-measured-project-choice-not-official-mandate"
+      },
+      "preserve": [
+        "5个Tab",
+        "二级返回栈",
+        "参数",
+        "现有首页状态"
+      ],
+      "acceptance": [
+        "五Tab进入返回可用",
+        "内容不被状态/导航区盖住",
+        "未测折叠连续性如实未验证"
+      ]
+    }
+  ]
+}

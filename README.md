@@ -1,5 +1,9 @@
 # deveco-dag
 
+UX 最小融合版：支持按 DAG 节点注入版本化 UX 资产，无设备时单独记录 UX 未验证，不阻塞代码任务。配置与复现步骤见 [UX 资产说明](assets/ux/README.md)。
+
+当前卡片资产保存在 [assets/ux](assets/ux/README.md)：全应用 12 张卡片（已含原资讯 3 张）。其他 UX 工具能力的迁移待方案确认后实施。
+
 Windows x64 上的 OpenCode DAG 插件，内置 Gitea 28.3.0。
 
 - `/dag 需求描述`：探索当前工程，生成并校验 `.dag/dag.json`。
