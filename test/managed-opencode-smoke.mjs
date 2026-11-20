@@ -1,7 +1,7 @@
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp, mkdir, readFile, writeFile, readdir, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, writeFile, readdir, realpath, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve, relative, isAbsolute} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -9,7 +9,8 @@ import {git} from '../src/dag_run/git.js';
 import {parseWorkerInput} from './worker-fixture.js';
 
 const packageRoot = resolve(process.argv[2]);
-const fixture = await mkdtemp(join(tmpdir(), 'dag-managed-host-')), repo = join(fixture, 'repo'), data = join(fixture, 'local runtime');
+const tempRoot = await realpath(tmpdir());
+const fixture = await mkdtemp(join(tempRoot, 'dag-managed-host-')), repo = join(fixture, 'repo'), data = join(fixture, 'local runtime');
 await mkdir(repo); await git(repo, ['init', '-q', '-b', 'main']);
 await git(repo, ['config', 'user.name', 'Managed runtime fixture']); await git(repo, ['config', 'user.email', 'managed@example.invalid']);
 await writeFile(join(repo, '.gitignore'), '.dag/\n'); await writeFile(join(repo, 'README.md'), '# Managed host fixture\n');
@@ -94,7 +95,7 @@ try {
   assert.ok(state.tasks[3].startedAt >= Math.max(state.tasks[1].finishedAt, state.tasks[2].finishedAt));
   for (const task of state.tasks) assert.equal((await readFile(join(repo, `task-${task.id}.txt`), 'utf8')).trim(), `Task ${task.id}`);
   assert.equal(await git(repo, ['rev-parse', 'HEAD']), state.tasks[3].mergeCommit);
-  console.log(JSON.stringify({passed: true, nativeOpenCode: true, bundledGiteaFirstUse: true, noRunnerConfig: true,
+  console.log(JSON.stringify({passed: true, nativeOpenCode: true, managedGiteaFirstUse: true, noRunnerConfig: true,
     nativeWorkerGitCredentials: true, forkedAcrossWorktrees: true, concurrentForks: true, dashboardShowsBothRunning: true, joinWaitsForBoth: true, prs: state.tasks.map(x => x.pr)}));
   if (process.env.DAG_TUI_SMOKE === '1') {
     console.log(JSON.stringify({tuiFixture: fixture, repo, origin: url, sessionID: parent.id}));
@@ -106,6 +107,6 @@ finally {
   try {const metadata = JSON.parse((await readFile(join(data, 'runtime.json'), 'utf8')).replace(/^\uFEFF/, '')); if (metadata.pid) process.kill(metadata.pid);} catch {}
   host.kill(); if (host.exitCode === null) await new Promise(resolve => host.once('exit', resolve));
   host.stdout.destroy(); host.stderr.destroy(); model.closeAllConnections(); await new Promise(resolve => model.close(resolve));
-  if (passed) {const path = relative(tmpdir(), fixture); if (!path || path.startsWith('..') || isAbsolute(path)) throw new Error('Unsafe cleanup'); await rm(fixture, {recursive: true, force: true});}
+  if (passed) {const path = relative(tempRoot, fixture); if (!path || path.startsWith('..') || isAbsolute(path)) throw new Error('Unsafe cleanup'); await rm(fixture, {recursive: true, force: true});}
   else console.error('Fixture retained:', fixture);
 }

@@ -1,0 +1,18 @@
+{
+  "version": "28.3.0",
+  "platform": "darwin",
+  "binaries": {
+    "arm64": {
+      "file": "gitea-28.3.0-darwin-arm64",
+      "bytes": 116095458,
+      "sha256": "0aca8f1f1d6a0b31abc2c7e5c40feec18f3e45ab0c7b11deaef259794ce45812",
+      "source": "https://dl.gitea.com/gitea/28.3.0/gitea-28.3.0-darwin-arm64"
+    },
+    "x64": {
+      "file": "gitea-28.3.0-darwin-amd64",
+      "bytes": 123843344,
+      "sha256": "4420bb44df8047cd4f3bec9162d559c0245dee7ef3b58bc5540d7a1eefd8b94f",
+      "source": "https://dl.gitea.com/gitea/28.3.0/gitea-28.3.0-darwin-amd64"
+    }
+  }
+}

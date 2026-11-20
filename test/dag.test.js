@@ -29,11 +29,26 @@ test('原地修改slash消息、仅允许worktree目标、无效内容不落盘�
   const config = {}; await hooks.config(config);
   assert.equal(config.command.dag.agent, 'dag-planner');
   assert.ok(!config.agent['dag-planner'].prompt.includes('numTasks'));
+  for (const agent of Object.values(config.agent)) {
+    assert.equal(agent.permission.skill, 'allow');
+    assert.equal(agent.permission.devecocli, 'allow');
+  }
   assert.deepEqual(await plugin({ client: {}, directory, worktree: root }), {});
   const parts = [{ type: 'text', text: 'original' }];
   await hooks['command.execute.before']({ command: 'dag', sessionID: 's', arguments: '三折叠适配' }, { parts });
   const target = join(root, '.dag', 'dag.json');
   assert.equal(parts[0].text, '/dag 三折叠适配'); assert.ok(parts[1].text.includes(target));
+  const skillDirectory = await mkdtemp(join(tmpdir(), 'external-skill-'));
+  t.after(() => rm(skillDirectory, {recursive: true, force: true}));
+  const reference = join(skillDirectory, 'reference.md');
+  await writeFile(reference, '# Skill reference');
+  const readReference = () => hooks['tool.execute.before']({sessionID: 's', tool: 'read'}, {args: {filePath: reference}});
+  await assert.rejects(readReference(), /本会话加载的技能/);
+  await hooks['tool.execute.before']({sessionID: 's', tool: 'skill'}, {args: {name: 'arbitrary-discovered-skill'}});
+  await hooks['tool.execute.after']({sessionID: 's', tool: 'skill'}, {metadata: {dir: skillDirectory}});
+  await readReference();
+  await assert.rejects(hooks.tool.devecocli.execute({args: ['emulator', 'start', 'other-device']},
+    {sessionID: 's', agent: 'dag-planner', directory}), /规划阶段仅/);
   const before = args => hooks['tool.execute.before']({ sessionID: 's', tool: 'write', callID: 'w' }, { args });
   await assert.rejects(before({ filePath: join(directory, '.dag', 'dag.json'), content: '{}' }), /唯一允许/);
   await assert.rejects(before({ filePath: target, content: '{}' }), /校验失败/);

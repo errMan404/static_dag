@@ -5,7 +5,7 @@ import { git } from './git.js';
 import { DagRun, registry, guardWorker } from './index.js';
 import { Progress } from './progress.js';
 const prompt = name => readFileSync(new URL(`./${name}.md`, import.meta.url), 'utf8');
-export function runnerHooks({ client, root, experimental_workspace }) {
+export function runnerHooks({ client, root, experimental_workspace, resumeOneDuo }) {
   experimental_workspace?.register('dag-task', {
     name: 'DAG task worktree', description: 'Existing Git worktree owned by DAG runtime',
     configure(info) { return { ...info, directory: resolve(info.extra.directory) }; },
@@ -15,7 +15,9 @@ export function runnerHooks({ client, root, experimental_workspace }) {
   const hooks = {
     config(config) {
       if (config.agent['dag-worker']) throw new Error('dag-worker 已存在');
-      config.agent['dag-worker'] = { mode: 'subagent', hidden: true, prompt: prompt('worker'), permission: { '*': 'allow', task: 'deny' } };
+      config.agent['dag-worker'] = { mode: 'subagent', hidden: true, prompt: prompt('worker'),
+        permission: { '*': 'allow', skill: 'allow', devecocli: 'allow', task: 'deny', submit_plan: 'deny', submit_checklist: 'deny',
+          list_evaluation_devices: 'deny', reserve_evaluation_device: 'deny', record_check_result: 'deny' } };
     },
     tool: {
       submit_task: tool({ description: '已测试并 git commit 后提交本节点PR。冲突直接作为返回值，解决冲突并重新测试提交后重试。', args: { summary: s.string().min(1) }, execute: async (args, context) => {
@@ -40,8 +42,23 @@ export function runnerHooks({ client, root, experimental_workspace }) {
       }
     },
     async control(input) {
+      if (input.action === 'resume-one-duo') {
+        try { await resumeOneDuo({sessionID: input.sessionID, workflowId: input.workflowId}); }
+        catch (error) { await new Progress(client, root, input.sessionID).toast(error.message, 'error'); }
+        return;
+      }
       const existing = registry.runs.get(input.sessionID);
       const active = registry.roots.get(root);
+      const workflow = registry.workflows.get(root);
+      if (workflow && input.action === 'start') {
+        await workflow.progress.toast('当前 worktree 已有 /one_duo 在执行');
+        return;
+      }
+      if (workflow?.parent === input.sessionID) {
+        if (input.action === 'cancel') await workflow.cancel();
+        if (input.action === 'status') await workflow.progress.update();
+        return;
+      }
       if (input.action === 'start' && active) {
         if (active.parent === input.sessionID) { await active.progress?.update('当前 DAG 已在运行'); return; }
         const notice = new Progress(client, root, input.sessionID);
@@ -99,7 +116,7 @@ export function runnerHooks({ client, root, experimental_workspace }) {
       if (event.type === 'message.part.updated' && part?.type === 'text' && part.ignored && control &&
           part.metadata.dagControlHandled !== true && typeof control.requestId === 'string' &&
           Number.isFinite(control.issuedAt) && Math.abs(Date.now() - control.issuedAt) < 300000 &&
-          ['start', 'status', 'cancel'].includes(control.action) && typeof control.root === 'string' && resolve(control.root).toLowerCase() === root.toLowerCase()) {
+          ['start', 'status', 'cancel', 'resume-one-duo'].includes(control.action) && typeof control.root === 'string' && resolve(control.root).toLowerCase() === root.toLowerCase()) {
         const seen = registry.controls ??= new Set();
         const key = `${part.sessionID}:${part.id}`;
         if (seen.has(key)) return;
@@ -111,12 +128,19 @@ export function runnerHooks({ client, root, experimental_workspace }) {
             query: {directory: root}, body: {...part, synthetic: true, ignored: true,
               metadata: {...part.metadata, dagControlHandled: true}}, headers: {'Content-Type': 'application/json'}, signal: AbortSignal.timeout(5000)});
           if (result.error) throw new Error('保存 DAG 控制消息处理标记失败');
-          await hooks.control({ sessionID: part.sessionID, action: control.action });
+          await hooks.control({sessionID: part.sessionID, action: control.action, workflowId: control.workflowId});
         })().catch(() => {});
       }
-      if (event.type === 'session.deleted') await registry.runs.get(event.properties?.info?.id)?.cancel();
+      if (event.type === 'session.deleted') {
+        const id = event.properties?.info?.id;
+        const workflow = registry.workflows.get(root);
+        if (workflow?.parent === id) await workflow.cancel();
+        else await registry.runs.get(id)?.cancel();
+      }
     },
     async dispose() {
+      const workflow = registry.workflows.get(root);
+      if (workflow) { await workflow.cancel(); await workflow.background; }
       const runs = [...registry.roots.values()].filter(run => run.root === root);
       await Promise.allSettled(runs.map(async run => { await run.cancel(); await run.background; }));
     }

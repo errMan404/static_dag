@@ -1,6 +1,6 @@
 # DAG 执行器第一版
 
-Windows x64 npm 版本默认使用包内 Gitea。没有 `.dag/runner.json` 或其中未指定 gitea.url 时，自动启动用户目录下的本机实例并配置 URL 专属的 Git 凭据助手；无需预先部署服务。根 README 说明安装和自动初始化。以下外部服务配置仅在需要自定义服务时使用。
+Windows x64 默认使用包内 Gitea，macOS 首次运行时下载并校验原生版本。没有 `.dag/runner.json` 或其中未指定 gitea.url 时，自动启动用户目录下的本机实例并配置 URL 专属的 Git 凭据助手。根 README 说明安装和自动初始化。以下外部服务配置用于自定义服务。
 
 自定义服务时，在目标主 worktree 创建 `.dag/runner.json`，参考本目录 `runner.example.json`。填写 gitea.url、owner、repoPrefix；当前分支必须是 baseBranch，已跟踪文件须提交干净。需要已有 Git 身份和该 Gitea 地址的推送凭据。无需预先创建 Gitea 项目仓库，也无需配置 origin 指向 Gitea。
 

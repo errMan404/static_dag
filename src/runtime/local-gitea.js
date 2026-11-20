@@ -1,10 +1,12 @@
 import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
-import {readFile} from 'node:fs/promises';
-import {join, basename} from 'node:path';
+import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {homedir} from 'node:os';
+import {join, basename, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createHash} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import {git} from '../dag_run/git.js';
+import {macLocalGitea} from './local-gitea-mac.js';
 
 const execute = promisify(execFile);
 const windowsEnvironment = () => {const env = {...process.env}; delete env.PSModulePath; return env;};
@@ -27,7 +29,8 @@ function bootstrap(args) {
 const manifestUrl = new URL('../../vendor/gitea/manifest.json', import.meta.url);
 const script = fileURLToPath(new URL('./local-gitea.ps1', import.meta.url));
 export function localDataRoot() {
-  if (process.env.DEVECO_DAG_DATA_DIR) return process.env.DEVECO_DAG_DATA_DIR;
+  if (process.env.DEVECO_DAG_DATA_DIR) return resolve(process.env.DEVECO_DAG_DATA_DIR);
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'DevecoDAG', 'gitea');
   if (!process.env.LOCALAPPDATA) throw new Error('Windows LOCALAPPDATA is unavailable');
   return join(process.env.LOCALAPPDATA, 'DevecoDAG', 'gitea');
 }
@@ -36,7 +39,10 @@ export function repositoryPrefix(root) {
   return value || `project-${createHash('sha256').update(root).digest('hex').slice(0, 10)}`;
 }
 export async function localGitea(action = 'start') {
-  if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('此版本的内置 Gitea 支持 Windows x64');
+  if (process.platform === 'darwin' && ['arm64', 'x64'].includes(process.arch)) return macLocalGitea(action, localDataRoot());
+  if (process.platform !== 'win32' || process.arch !== 'x64') {
+    throw new Error('本地 Gitea 支持 macOS（Apple Silicon 或 Intel）和 Windows x64；其他平台可在 .dag/runner.json 配置外部 Gitea');
+  }
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   const binary = fileURLToPath(new URL(`../../vendor/gitea/${manifest.file}`, import.meta.url));
   try {
@@ -49,13 +55,32 @@ export async function localGitea(action = 'start') {
     throw new Error(`本地 Gitea 初始化失败${reason ? '：' + reason : '，请查看用户数据目录中的 log'}`);
   }
 }
+const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+
+async function macCredentialCommand(runtime) {
+  const helper = join(runtime.dataRoot, 'git-credential.sh');
+  const source = await readFile(new URL('./git-credential-mac.sh', import.meta.url));
+  const installed = await readFile(helper).catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  if (!installed?.equals(source)) {
+    const temporary = helper + '.' + randomUUID() + '.tmp';
+    try {
+      await writeFile(temporary, source, {mode: 0o600, flag: 'wx'});
+      await rename(temporary, helper);
+    } finally { await unlink(temporary).catch(error => {if (error.code !== 'ENOENT') throw error;}); }
+  }
+  return `!/bin/sh ${shellQuote(helper)} ${shellQuote(runtime.url)} ${shellQuote(runtime.owner)}`;
+}
+
 export async function configureLocalGit(root, runtime) {
-  // URL-scoped helper: no token in Git config, environment, URLs or model input.
-  // Use a stable helper path so npm upgrades/cache eviction cannot break Git.
-  const helper = join(runtime.dataRoot, 'git-credential.ps1').replaceAll('\\', '/').replaceAll("'", "'\\''");
+  // Keep the helper stable across package updates and narrowly scoped to this URL.
+  const command = process.platform === 'darwin'
+    ? await macCredentialCommand(runtime)
+    : `!powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${shellQuote(join(runtime.dataRoot, 'git-credential.ps1').replaceAll('\\', '/'))}`;
   const key = `credential.${runtime.url}.helper`;
   await git(root, ['config', '--local', '--replace-all', key, '']);
-  await git(root, ['config', '--local', '--add', key, `!powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '${helper}'`]);
+  await git(root, ['config', '--local', '--add', key, command]);
 }
 export async function loadRunnerConfig(root) {
   let config;
@@ -68,9 +93,18 @@ export async function loadRunnerConfig(root) {
   return {config, token: runtime.token};
 }
 export async function enableWorkspaces() {
+  const value = process.env.OPENCODE_EXPERIMENTAL_WORKSPACES ?? process.env.OPENCODE_EXPERIMENTAL;
+  if (['true', '1'].includes(value?.toLowerCase())) return true;
   if (process.platform !== 'win32') return false;
-  if (['true', '1'].includes(process.env.OPENCODE_EXPERIMENTAL_WORKSPACES)) return true;
   await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     "[Environment]::SetEnvironmentVariable('OPENCODE_EXPERIMENTAL_WORKSPACES', 'true', 'User')"], {windowsHide: true, env: windowsEnvironment(), timeout: 10000});
   return false; // Host reads this flag before plugin loading. A restart is required.
+}
+
+export async function requireWorkspaces() {
+  if (await enableWorkspaces()) return;
+  if (process.platform === 'win32') {
+    throw new Error('已为当前 Windows 用户保存 Workspace 开关。请退出 OpenCode，在 PowerShell 中执行 $env:OPENCODE_EXPERIMENTAL_WORKSPACES="true" 后重启 OpenCode，再运行命令。');
+  }
+  throw new Error('当前 OpenCode 进程未启用 Workspace。请退出后用 OPENCODE_EXPERIMENTAL_WORKSPACES=true opencode <项目路径> 重启，再运行命令。');
 }

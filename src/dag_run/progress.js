@@ -1,5 +1,47 @@
 const labels = { pending: '待执行', running: '执行中', done: '已完成', blocked: '阻塞', failed: '失败', cancelled: '已取消', paused: '已停止' };
 
+export function nextToolActivity(part, last) {
+  const startedAt = part.state?.time?.start;
+  if (!Number.isFinite(startedAt)) return;
+  const finishedAt = part.state.time.end;
+  if (last && (last.startedAt > startedAt ||
+      (last.startedAt === startedAt && (last.finishedAt ?? 0) >= (finishedAt ?? 0)))) return;
+  return {tool: part.tool, startedAt, finishedAt};
+}
+
+function taskView({id, title, status, dependencies = [], session, workspaceID, pr, error, retry}) {
+  return {id, title, status, dependencies: [...dependencies], session, workspaceID, pr, error,
+    retry: retry && {attempt: retry.attempt, waiting: retry.waiting, statusCode: retry.statusCode, nextRetryAt: retry.nextRetryAt}};
+}
+
+function evaluationView(task) {
+  const {target, device, itemCount, verdict, waitingDevice, deviceLockError, cleanupError, checkProgress, activity} = task;
+  return {...taskView(task), target, device, itemCount, waitingDevice, deviceLockError,
+    error: task.error ?? deviceLockError ?? cleanupError,
+    checkProgress: checkProgress && {submitted: checkProgress.submitted, lastId: checkProgress.lastId},
+    activity: activity && {tool: activity.tool, startedAt: activity.startedAt, finishedAt: activity.finishedAt},
+    verdict: verdict && {passed: verdict.passed, failed: verdict.failed, unverified: verdict.unverified}};
+}
+
+function planningView(planning) {
+  if (!planning) return;
+  const {round, status, session, activity, taskCount, checkCount, error} = planning;
+  return {round, status, session, activity: activity && {...activity}, taskCount, checkCount, error};
+}
+
+function workflowView({phase, round, targets, checkCount = 0, rounds, planning}) {
+  return {phase, round, targets: [...targets], checkCount, planning: planningView(planning), rounds: rounds.map(current => {
+    const {result} = current;
+    return {
+      round: current.round, commit: current.commit, change: current.change,
+      planning: planningView(current.planning),
+      changeTasks: (current.changeTasks ?? []).map(taskView),
+      evaluationTasks: (current.evaluationTasks ?? []).map(evaluationView),
+      result: result && {action: result.action, reason: result.reason, ids: result.ids && [...result.ids]}
+    };
+  })};
+}
+
 // Synthetic, ignored transport parts persist dashboard data without rendering
 // user chat bubbles or entering model context. Update one part throughout a run.
 export class Progress {
@@ -8,9 +50,11 @@ export class Progress {
   }
   text() {
     const state = this.run?.state;
-    return ['DAG 运行进度', `状态：${state ? labels[state.status] ?? state.status : this.status} · 耗时 ${Math.floor((Date.now() - this.started) / 1000)} 秒`,
+    const status = this.workflow?.state.status ?? state?.status ?? this.status;
+    return [this.workflow ? '/one_duo 运行进度' : 'DAG 运行进度', `状态：${labels[status] ?? status} · 耗时 ${Math.floor((Date.now() - this.started) / 1000)} 秒`,
       state ? `任务：${state.tasks.filter(task => task.status === 'done').length}/${state.tasks.length} 已完成` : '',
-      this.detail, '/dag_panel 查看任务和 Agent 详情 · /dag_cancel 取消', this.run ? `运行记录：${this.run.dir}` : ''].filter(Boolean).join('\n');
+      this.detail, '/dag_panel 查看任务和 Agent 详情 · /dag_cancel 取消',
+      this.workflow || this.run ? `运行记录：${this.workflow?.dir ?? this.run.dir}` : ''].filter(Boolean).join('\n');
   }
   async open() {
     try {
@@ -22,14 +66,16 @@ export class Progress {
     } catch { await this.toast('DAG 正在检查启动条件'); }
   }
   view() {
-    return { root: this.root, parent: this.sessionID, id: this.run?.state.id, status: this.run?.state.status ?? this.status,
+    const workflow = this.workflow?.state;
+    return { root: this.root, parent: this.sessionID, id: this.workflow?.state.id ?? this.run?.state.id,
+      status: this.workflow?.state.status ?? this.run?.state.status ?? this.status,
       localBranch: this.run?.state.localBranch, initialCommit: this.run?.state.initialCommit, integrationBranch: this.run?.state.integrationBranch,
       gitea: this.run?.state.gitea,
       maxConcurrency: this.run?.state.maxConcurrency,
       ux: this.run?.state.ux,
-      detail: this.detail, directory: this.run?.dir, startedAt: this.started, updatedAt: Date.now(),
-      tasks: (this.run?.state.tasks ?? []).map(({ id, title, status, dependencies, session, workspaceID, pr, error, retry }) =>
-        ({ id, title, status, dependencies, session, workspaceID, pr, error, retry })) };
+      detail: this.detail, directory: this.workflow?.dir ?? this.run?.dir, startedAt: this.started, updatedAt: Date.now(),
+      tasks: (this.run?.state.tasks ?? []).map(taskView),
+      ...(workflow ? {workflow: workflowView(workflow)} : {}) };
   }
   async toast(message, variant = 'info') {
     try { await this.client.tui.showToast({ body: { title: 'DAG', message, variant }, signal: AbortSignal.timeout(3000) }); } catch { /* Headless hosts may have no TUI. */ }
