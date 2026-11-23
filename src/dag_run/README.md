@@ -32,7 +32,7 @@ Token 优先读取 `GITEA_TOKEN`，未设置时非交互读取当前仓库的 Gi
 
 OpenCode 1.19.5 的 Fork 路由优先绑定源会话 Workspace，单独指定新 directory 无效。本模块注册原生 `dag-task` Workspace adapter，通过 Workspace API 注册已创建的 Git worktree，Fork 后使用 `/sync/steal` 迁移归属并检查 Workspace ID；git 工具核对实际 ToolContext.directory。必须开启上述实验选项。本实现针对 1.19.5，不宣称兼容 2.x。
 
-`/dag_run` 是 TUI 插件命令，直接向服务器发送 noReply 控制消息，不调用模型启动。框架的 execute 循环按就绪队列并发调度，runner.json 中 maxConcurrency 为正整数，默认 20，设为 1 可串行执行。前置 PR 合并并同步且 Agent 最终回复结束后才可启动后继；有空位时立即调度，不等待整个批次。没有协调 Agent 或 dag_next 工具。主会话 idle 不会打断调度。单依赖使用真正的 session.fork；零依赖和多依赖创建新 session。每个节点独立 worktree/分支，所有节点使用相同 `worker.md`。多依赖新会话接收直接前置报告。代码来自启动 worktree 的本轮基线及此前已确认合入的任务结果。
+`/dag_run` 是 TUI 插件命令，直接向服务器发送 noReply 控制消息，不调用模型启动。框架的 execute 循环按就绪队列并发调度，runner.json 中 maxConcurrency 为正整数，默认 20，设为 1 可串行执行。前置 PR 合并并同步且 Agent 最终回复结束后才可启动后继；有空位时立即调度，不等待整个批次。没有协调 Agent 或 dag_next 工具。主会话 idle 不会打断调度。默认每个节点创建新 session 并接收直接前置报告；runner.json 设 forkSession 为 true 时，单依赖改用 session.fork。每个节点独立 worktree/分支，所有节点使用相同 `worker.md`。多依赖新会话接收直接前置报告。代码来自启动 worktree 的本轮基线及此前已确认合入的任务结果。
 
 任务开发并发，但 worktree 基线创建与 submit_task 的 push/PR 合并/主工作区同步共用串行集成队列，避免 HEAD 校验和 Git 引用互相干扰。状态快照也按调用顺序写入。各 Agent 解决冲突时使用自己的修复引用，不争用主工作区的跟踪引用。取消或任一节点失败时，停止所有活动 Agent，等待已开始的集成操作收尾后再释放运行锁，未执行节点标为 blocked；已确认合并的提交保留。
 

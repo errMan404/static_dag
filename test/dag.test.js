@@ -44,6 +44,18 @@ test('原地修改slash消息、仅允许worktree目标、无效内容不落盘�
   const output = { title: '', output: 'written', metadata: {} };
   await hooks['tool.execute.after']({ sessionID: 's', tool: 'write', callID: 'w' }, output);
   assert.equal(output.metadata.dagValidated, true);
+  // The same submission from a model that has apply_patch instead of write; it replaces the file already there.
+  const patch = (path, text) => ({ patchText: `*** Begin Patch\n*** Add File: ${path}\n+${text}\n*** End Patch` });
+  const patching = args => hooks['tool.execute.before']({ sessionID: 's', tool: 'apply_patch', callID: 'p' }, { args });
+  await assert.rejects(patching(patch('src/a.js', 'x')), /唯一允许/);
+  await assert.rejects(patching(patch(target, '{}')), /校验失败/);
+  const good = patch(target, JSON.stringify({ tasks: [task(1), task(2)] }));
+  await patching(good);
+  await assert.rejects(readFile(target), /ENOENT/);
+  await writeFile(target, good.patchText.split('\n').filter(l => l.startsWith('+')).map(l => l.slice(1)).join('\n'));
+  const patched = { title: '', output: 'written', metadata: {} };
+  await hooks['tool.execute.after']({ sessionID: 's', tool: 'apply_patch', callID: 'p' }, patched);
+  assert.equal(patched.metadata.taskCount, 2);
   await hooks['chat.message']({ sessionID: 's', agent: 'build' });
   await hooks['tool.execute.before']({ sessionID: 's', tool: 'bash' }, { args: {} });
 });

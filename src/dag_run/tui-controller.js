@@ -33,6 +33,10 @@ export async function installPanel(api, renderDashboard, renderDetailReturn) {
       }
       for (const task of view.tasks ?? []) if (task.session) api.kv.set(prefix + ':task:' + task.session,
         {root: view.root, runId: view.id, parent: view.parent, taskId: task.id});
+      for (const task of view.tasks ?? []) for (const review of task.reviews ?? []) if (review.session) {
+        api.kv.set(prefix + ':session:' + review.session, view.root);
+        api.kv.set(prefix + ':task:' + review.session, {root: view.root, runId: view.id, parent: view.parent, taskId: task.id});
+      }
     };
     const unsubscribe = api.event.on('message.part.updated', event => {
       const view = viewFromPart(event.properties.part);
@@ -64,7 +68,7 @@ export async function installPanel(api, renderDashboard, renderDetailReturn) {
     }
 
     function open(task) {
-      if (!task?.session) {api.ui.toast({message: '此任务尚未创建 Agent 会话', variant: 'info'}); return;}
+      if (!task?.session) {api.ui.toast({message: task?.kind === 'stage' && task.status !== 'pending' ? '这个节点由程序直接执行，没有 Agent 会话' : '此节点尚未创建 Agent 会话', variant: 'info'}); return;}
       api.route.navigate('session', {sessionID: task.session});
     }
     function panel() {
@@ -74,7 +78,8 @@ export async function installPanel(api, renderDashboard, renderDetailReturn) {
       api.route.navigate('static-dag.dashboard', {root: ownerRoot, parent, runId: view?.id, focusTask: link?.taskId});
     }
     const isTaskDetail = () => api.route.current.name === 'session' &&
-      !!current()?.tasks?.some(task => task.session === api.route.current.params.sessionID);
+      !!current()?.tasks?.some(task => task.session === api.route.current.params.sessionID ||
+        task.reviews?.some(review => review.session === api.route.current.params.sessionID));
     api.keymap.registerLayer({ mode: 'base', priority: 10,
       enabled: () => isTaskDetail() && !api.ui.dialog.open,
       commands: [{name: 'static-dag.detail.back', title: '返回 DAG 看板', run: panel}],
@@ -85,8 +90,8 @@ export async function installPanel(api, renderDashboard, renderDetailReturn) {
     }});
     async function control(action) {
       let view = current();
-      if (action !== 'start' && !view?.parent) { api.ui.toast({message: '当前 session 没有关联 DAG', variant: 'info'}); return; }
-      let sessionID = action === 'start' && api.route.current.name === 'session'
+      if (action !== 'start' && action !== 'one_duo' && !view?.parent) { api.ui.toast({message: '当前 session 没有关联 DAG', variant: 'info'}); return; }
+      let sessionID = (action === 'start' || action === 'one_duo') && api.route.current.name === 'session'
         ? api.route.current.params.sessionID : view?.parent ?? api.route.current.params?.parent;
       if (view?.tasks?.some(task => task.session === sessionID)) sessionID = view.parent;
       if (!sessionID) {
@@ -94,13 +99,13 @@ export async function installPanel(api, renderDashboard, renderDetailReturn) {
         if (created.error || !created.data) throw new Error('无法创建 DAG 主会话');
         sessionID = created.data.id;
       }
-      if (action === 'start') {
+      if (action === 'start' || action === 'one_duo') {
         const ownerRoot = root();
         remember({root: ownerRoot, parent: sessionID, status: '启动检查', detail: '正在检查运行条件', tasks: []});
         api.route.navigate('static-dag.dashboard', {root: ownerRoot, parent: sessionID});
       }
       const result = await api.client.session.prompt({ sessionID, directory: root(), noReply: true,
-        parts: [{type: 'text', synthetic: true, ignored: true, text: `/dag_${action === 'start' ? 'run' : action}`,
+        parts: [{type: 'text', synthetic: true, ignored: true, text: action === 'one_duo' ? '/one_duo' : `/dag_${action === 'start' ? 'run' : action}`,
           metadata: {dagControl: {action, root: root(), requestId: crypto.randomUUID(), issuedAt: Date.now()}}}] });
       if (result.error) throw new Error('DAG 控制请求失败');
     }
@@ -111,6 +116,7 @@ export async function installPanel(api, renderDashboard, renderDetailReturn) {
       refresh: safe(() => control('status')), cancel: safe(() => control('cancel'))
     })}]);
     api.keymap.registerLayer({ commands: [
+      {name: 'static-dag.one-duo', title: '一多适配：准备、规划并执行', category: 'DAG', namespace: 'palette', slashName: 'one_duo', run: safe(async () => {await control('one_duo'); panel();})},
       {name: 'static-dag.run', title: '运行 DAG', category: 'DAG', namespace: 'palette', slashName: 'dag_run', run: safe(async () => {await control('start'); panel();})},
       {name: 'static-dag.panel', title: 'DAG 任务面板', category: 'DAG', namespace: 'palette', slashName: 'dag_panel', run: safe(async () => {await restore(); panel();})},
       {name: 'static-dag.status', title: '刷新 DAG 状态', category: 'DAG', namespace: 'palette', slashName: 'dag_status', run: safe(async () => {await control('status'); panel();})},

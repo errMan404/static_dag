@@ -67,6 +67,8 @@ test('Fork历史路径映射到当前工作区，拒绝命令使用旧目录，�
     assert.equal(args.filePath, join(worktree, 'src/a.js'));
     assert.throws(() => guardWorker('guard-fixture', 'bash', { command: `git -C "${root}" status` }), /旧工作区/);
     const bash = { command: 'git status' }; guardWorker('guard-fixture', 'bash', bash); assert.equal(bash.workdir, worktree);
+    guardWorker('guard-fixture', 'apply_patch', { patchText: '*** Begin Patch\n*** Add File: src/b.js\n+x\n*** End Patch' });
+    assert.throws(() => guardWorker('guard-fixture', 'apply_patch', { patchText: '*** Begin Patch\n*** Update File: ../outside.js\n@@\n-a\n+b\n*** End Patch' }), /worktree 之外/);
     task.status = 'done'; assert.throws(() => guardWorker('guard-fixture', 'write', args), /已结束/);
   } finally { registry.workers.delete('guard-fixture'); }
 });

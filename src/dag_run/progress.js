@@ -28,8 +28,8 @@ export class Progress {
       maxConcurrency: this.run?.state.maxConcurrency,
       ux: this.run?.state.ux,
       detail: this.detail, directory: this.run?.dir, startedAt: this.started, updatedAt: Date.now(),
-      tasks: (this.run?.state.tasks ?? []).map(({ id, title, status, dependencies, session, workspaceID, pr, error, retry }) =>
-        ({ id, title, status, dependencies, session, workspaceID, pr, error, retry })) };
+      tasks: (this.run?.state.tasks ?? []).map(({ id, title, status, dependencies, session, workspaceID, pr, error, retry, noChange, reviews }) =>
+        ({ id, title, status, dependencies, session, workspaceID, pr, error, retry, noChange, reviews })) };
   }
   async toast(message, variant = 'info') {
     try { await this.client.tui.showToast({ body: { title: 'DAG', message, variant }, signal: AbortSignal.timeout(3000) }); } catch { /* Headless hosts may have no TUI. */ }

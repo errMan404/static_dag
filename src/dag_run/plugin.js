@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { git } from './git.js';
 import { DagRun, registry, guardWorker } from './index.js';
 import { Progress } from './progress.js';
+import { OneDuo } from '../one_duo.js';
 const prompt = name => readFileSync(new URL(`./${name}.md`, import.meta.url), 'utf8');
 export function runnerHooks({ client, root, experimental_workspace }) {
   experimental_workspace?.register('dag-task', {
@@ -49,7 +50,15 @@ export function runnerHooks({ client, root, experimental_workspace }) {
         await notice.open(); await notice.finish('当前 worktree 已有 DAG 在其他 session 运行，请切换到原 session 查看。');
         return;
       }
-      if (input.action === 'cancel') { await existing?.cancel(); return; }
+      const pipeline = registry.pipelines?.get(input.sessionID);
+      if (input.action === 'one_duo') {
+        if (pipeline?.status === 'running') { await pipeline.progress.update('一多适配已在运行'); return; }
+        // The whole pipeline runs in the background of this session; its progress part carries every node.
+        void new OneDuo({ root, parent: input.sessionID, client }).run({ pages: input.arguments ?? '' });
+        return;
+      }
+      if (input.action === 'cancel') { await (pipeline ?? existing)?.cancel(); return; }
+      if (input.action === 'status' && pipeline) { await pipeline.progress.update(); return; }
       if (input.action === 'status' && existing) { await existing.progress?.update(); return; }
       if (input.action === 'status') {
         const result = await client.session.messages({path: {id: input.sessionID}, query: {directory: root}});
@@ -99,7 +108,7 @@ export function runnerHooks({ client, root, experimental_workspace }) {
       if (event.type === 'message.part.updated' && part?.type === 'text' && part.ignored && control &&
           part.metadata.dagControlHandled !== true && typeof control.requestId === 'string' &&
           Number.isFinite(control.issuedAt) && Math.abs(Date.now() - control.issuedAt) < 300000 &&
-          ['start', 'status', 'cancel'].includes(control.action) && typeof control.root === 'string' && resolve(control.root).toLowerCase() === root.toLowerCase()) {
+          ['start', 'status', 'cancel', 'one_duo'].includes(control.action) && typeof control.root === 'string' && resolve(control.root).toLowerCase() === root.toLowerCase()) {
         const seen = registry.controls ??= new Set();
         const key = `${part.sessionID}:${part.id}`;
         if (seen.has(key)) return;
@@ -111,7 +120,7 @@ export function runnerHooks({ client, root, experimental_workspace }) {
             query: {directory: root}, body: {...part, synthetic: true, ignored: true,
               metadata: {...part.metadata, dagControlHandled: true}}, headers: {'Content-Type': 'application/json'}, signal: AbortSignal.timeout(5000)});
           if (result.error) throw new Error('保存 DAG 控制消息处理标记失败');
-          await hooks.control({ sessionID: part.sessionID, action: control.action });
+          await hooks.control({ sessionID: part.sessionID, action: control.action, arguments: typeof control.arguments === 'string' ? control.arguments : '' });
         })().catch(() => {});
       }
       if (event.type === 'session.deleted') await registry.runs.get(event.properties?.info?.id)?.cancel();

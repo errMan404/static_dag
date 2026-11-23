@@ -10,6 +10,7 @@ import { loadRunnerConfig, enableWorkspaces } from '../runtime/local-gitea.js';
 import { taskInput } from './input.js';
 import { ModelGate, rateLimit, retryDelay } from './rate-limit.js';
 import { loadUx, nodeUx, writeUxReport } from './ux.js';
+import { patchFiles } from '../patch.js';
 
 export const registry = globalThis[Symbol.for('static-dag.execution')] ??= { runs: new Map(), workers: new Map(), roots: new Map() };
 export const DEFAULT_MAX_CONCURRENCY = 20;
@@ -233,7 +234,10 @@ export class DagRun {
         await git(this.root, ['worktree', 'add', '-b', task.branch, task.worktree, task.baseCommit]);
       });
       context.abort.throwIfAborted();
-      const source = task.dependencies.length === 1 ? this.state.tasks.find(t => t.id === task.dependencies[0]) : undefined;
+      // A task starts in a session of its own and learns about its predecessors from their reports. Forking the
+      // predecessor's session ("forkSession": true in .dag/runner.json) hands over its whole conversation instead,
+      // which made every task begin with tens of thousands of tokens it never needed and slowed each step.
+      const source = this.config.forkSession === true && task.dependencies.length === 1 ? this.state.tasks.find(t => t.id === task.dependencies[0]) : undefined;
       const workspace = unwrap(await this.client._client.post({ url: '/experimental/workspace', query: { directory: this.root },
         body: { type: 'dag-task', branch: task.branch, extra: { directory: task.worktree } }, headers: { 'Content-Type': 'application/json' } }));
       task.workspaceID = workspace.id;
@@ -257,7 +261,7 @@ export class DagRun {
       task.report = result.parts?.filter(p => p.type === 'text').map(p => p.text).join('\n') ?? '';
       if (task.status !== 'done') throw new Error('节点会话已结束，但 submit_task 尚未完成 PR 合并');
       task.finishedAt = Date.now();
-      await this.save(); await this.progress?.update(`节点 ${task.id} 已完成并合并 PR #${task.pr}`);
+      await this.save(); await this.progress?.update(task.noChange ? `节点 ${task.id} 已完成（无代码改动）` : `节点 ${task.id} 已完成并合并 PR #${task.pr}`);
       return { id: task.id, status: task.status, pr: task.pr, session: task.session, report: task.report };
     } catch (error) {
       const status = context.abort.aborted ? 'cancelled' : 'failed';
@@ -283,7 +287,13 @@ export class DagRun {
         await clean(task.worktree);
         if (await git(task.worktree, ['branch', '--show-current']) !== task.branch) throw new Error('任务分支被切换，拒绝提交');
         const head = await git(task.worktree, ['rev-parse', 'HEAD']);
-        if (head === task.baseCommit) throw new Error('请先完成代码并 git commit，再调用 submit_task');
+        // A task may legitimately end with nothing to change (a page that already fits, a regression pass that
+        // finds no regression). The tree is clean and has no commit of its own, so there is nothing to merge.
+        if (head === task.baseCommit) {
+          task.status = 'done'; task.noChange = true; task.commit = head;
+          await this.save(); await this.progress?.update(`节点 ${task.id} · 没有代码改动，记为完成`);
+          return { status: 'merged', noChange: true, message: '本任务没有代码改动，已记为完成，无需合并。请在交付摘要里说明为什么不需要改动。' };
+        }
         await git(task.worktree, ['push', '-u', this.state.gitRemote, `HEAD:refs/heads/${task.branch}`]);
         this.controller.signal.throwIfAborted();
         await this.assertLocal();
@@ -306,6 +316,9 @@ export class DagRun {
   }
 }
 
+const DEVICE_COMMAND = /(^|[\s;&|('"/\\])(hdc(\.exe)?|uitest|aa\s+(start|force-stop)|devecocli\s+(run|device|emulator))(\s|$)/;
+const DEVICE_TOOLS = ['verify_ui', 'save_ui_screenshot', 'capture_pages'];
+
 export function guardWorker(session, tool, args) {
   const worker = registry.workers.get(session); if (!worker) return;
   const { run, task } = worker;
@@ -320,8 +333,15 @@ export function guardWorker(session, tool, args) {
     if (old) args[key] = resolve(task.worktree, relative(old, value));
     if (['write', 'edit', 'multiedit'].includes(tool) && !inside(args[key])) throw new Error('禁止写入本任务 worktree 之外的路径');
   }
+  if (tool === 'apply_patch') for (const file of patchFiles(args.patchText))
+    if (!inside(resolve(task.worktree, file.path))) throw new Error(`禁止写入本任务 worktree 之外的路径：${file.path}`);
+  // Other plugins' device tools (and our own whole-project capture) drive a device without queueing for it:
+  // they would stop the app under another task's capture, or inspect whichever task's package was installed last.
+  if (DEVICE_TOOLS.includes(tool)) throw new Error(`任务里不能使用 ${tool}：设备由所有任务共用。需要在设备上看界面时调用 verify_page 工具，它负责排队、安装本任务的包并导出截图和组件树`);
   if (tool === 'bash') {
     args.workdir = args.workdir ?? task.worktree;
+    // Devices are shared by all tasks; only verify_page may use them, because it queues.
+    if (DEVICE_COMMAND.test(String(args.command))) throw new Error('设备由所有任务共用，不能直接执行 hdc、uitest、aa 或 devecocli run/device/emulator；需要在设备上看界面时调用 verify_page 工具');
     if (!inside(args.workdir) || roots.some(root => String(args.command).toLowerCase().includes(root.toLowerCase()) || String(args.command).toLowerCase().includes(root.replaceAll('\\', '/').toLowerCase()))) throw new Error(`命令仍引用旧工作区，请改为在 ${task.worktree} 使用相对路径运行`);
   }
 }
